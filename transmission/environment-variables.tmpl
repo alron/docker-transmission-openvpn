@@ -90,3 +90,6 @@ export WEBPROXY_PORT={{ .Env.WEBPROXY_PORT }}
 
 # Support dropping the default route after connection
 export DROP_DEFAULT_ROUTE={{ .Env.DROP_DEFAULT_ROUTE }}
+
+## Persist PIA Client ID across rebuilds
+export TRANSMISSION_PERSIST_PIA_PORT_ID={{ .Env.TRANSMISSION_PERSIST_PIA_PORT_ID }}

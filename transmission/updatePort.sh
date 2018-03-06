@@ -1,94 +1,111 @@
-#! /bin/sh
+#!/bin/bash
 
 # Source our persisted env variables from container startup
 . /etc/transmission/environment-variables.sh
 
 # Settings
-TRANSMISSION_PASSWD_FILE=/config/transmission-credentials.txt
+_TRANSMISSION_PASSWD_FILE="/config/transmission-credentials.txt"
 
-transmission_username=$(head -1 $TRANSMISSION_PASSWD_FILE)
-transmission_passwd=$(tail -1 $TRANSMISSION_PASSWD_FILE)
-pia_client_id_file=/etc/transmission/pia_client_id
-transmission_settings_file=${TRANSMISSION_HOME}/settings.json
+readarray -t _TRANSMISSION_AUTH_CONFIG < "${_TRANSMISSION_PASSWD_FILE}"
+_TRANSMISSION_USERNAME="${_TRANSMISSION_AUTH_CONFIG[0]}"
+_TRANSMISSION_PASSWD="${_TRANSMISSION_AUTH_CONFIG[1]}"
+
+if [[ "${TRANSMISSION_PERSIST_PIA_PORT_ID,,}" == "true" ]]; then
+  ## Persist across image rebuilds.
+  _PIA_CLIENT_ID_FILE="/config/pia_client_id"
+else
+  _PIA_CLIENT_ID_FILE="/etc/transmission/pia_client_id"
+fi
+
+_TRANSMISSION_SETTINGS_FILE="${TRANSMISSION_HOME}/settings.json"
 
 #
 # First get a port from PIA
 #
 
-new_client_id() {
-    head -n 100 /dev/urandom | sha256sum | tr -d " -" | tee $pia_client_id_file
+function piaNewClientID {
+  head -n 100 /dev/urandom | sha256sum | tr -d " -" | tee "${_PIA_CLIENT_ID_FILE}"
 }
 
-pia_client_id="$(cat $pia_client_id_file 2>/dev/null)"
-if [ -z "${pia_client_id}" ]; then
-   echo "Generating new client id for PIA"
-   pia_client_id=$(new_client_id)
+## Only read client id if file exists.
+if [[ -f "${_PIA_CLIENT_ID_FILE}" ]]; then
+  _PIA_CLIENT_ID="$(< "${_PIA_CLIENT_ID_FILE}")"
+fi
+
+if [[ -z "${_PIA_CLIENT_ID}" ]]; then
+  echo "Generating new client id for PIA"
+  _PIA_CLIENT_ID=$(piaNewClientID)
 fi
 
 # Get the port
-port_assignment_url="http://209.222.18.222:2000/?client_id=$pia_client_id"
-pia_response=$(curl -s -f "$port_assignment_url")
-pia_curl_exit_code=$?
+_PORT_ASSIGNMENT_URL="http://209.222.18.222:2000/?client_id=${_PIA_CLIENT_ID}"
+_PIA_RESPONSE="$(curl -s -f "${_PORT_ASSIGNMENT_URL}")"
+_PIA_CURL_EXIT_CODE="$?"
 
-if [ -z "$pia_response" ]; then
-    echo "Port forwarding is already activated on this connection, has expired, or you are not connected to a PIA region that supports port forwarding"
+if [[ -z "${_PIA_RESPONSE}" ]]; then
+  echo "Port forwarding is already activated on this connection, has expired, or you are not connected to a PIA region that supports port forwarding"
 fi
 
 # Check for curl error (curl will fail on HTTP errors with -f flag)
-if [ $pia_curl_exit_code -ne 0 ]; then
-   echo "curl encountered an error looking up new port: $pia_curl_exit_code"
-   exit
+if (( _PIA_CURL_EXIT_CODE != 0 )); then
+  echo "curl encountered an error looking up new port: ${_PIA_CURL_EXIT_CODE}"
+  exit 1
 fi
 
 # Check for errors in PIA response
-error=$(echo "$pia_response" | grep -oE "\"error\".*\"")
-if [ ! -z "$error" ]; then
-   echo "PIA returned an error: $error"
-   exit
+## TODO: Convert to builtin grep
+_PIA_ERROR="$(echo "${_PIA_RESPONSE}" | grep -oE "\"error\".*\"")"
+if [[ -n "${_PIA_ERROR}" ]]; then
+  echo "PIA returned an error: ${_PIA_ERROR}"
+  exit 1
 fi
 
 # Get new port, check if empty
-new_port=$(echo "$pia_response" | grep -oE "[0-9]+")
-if [ -z "$new_port" ]; then
-    echo "Could not find new port from PIA"
-    exit
+## TODO: Convert to builtin grep
+_PIA_NEW_PORT=$(echo "${_PIA_RESPONSE}" | grep -oE "[0-9]+")
+if [[ -z "${_PIA_NEW_PORT}" ]]; then
+  echo "Could not find new port from PIA"
+  exit 1
 fi
-echo "Got new port $new_port from PIA"
+echo "Got new port ${_PIA_NEW_PORT} from PIA"
 
 #
 # Now, set port in Transmission
 #
 
 # Check if transmission remote is set up with authentication
-auth_enabled=$(grep 'rpc-authentication-required\"' "$transmission_settings_file" \
-                   | grep -oE 'true|false')
-if [ "true" = "$auth_enabled" ]
-  then
+_AUTH_ENABLED=$(grep 'rpc-authentication-required\"' "${_TRANSMISSION_SETTINGS_FILE}" | grep -oE 'true|false')
+if [[ "${_AUTH_ENABLED}" == "true" ]]; then
   echo "transmission auth required"
-  myauth="--auth $transmission_username:$transmission_passwd"
+  _TRANSMISSION_AUTH="--auth ${_TRANSMISSION_USERNAME}:${_TRANSMISSION_PASSWD}"
 else
-    echo "transmission auth not required"
-    myauth=""
+  echo "transmission auth not required"
+  _TRANSMISSION_AUTH=""
 fi
 
 # get current listening port
-transmission_peer_port=$(transmission-remote $myauth -si | grep Listenport | grep -oE '[0-9]+')
-if [ "$new_port" != "$transmission_peer_port" ]; then
-  if [ "true" = "$ENABLE_UFW" ]; then
+_TRANSMISSION_PEER_PORT=$(transmission-remote ${_TRANSMISSION_AUTH} -si | grep Listenport | grep -oE '[0-9]+')
+if (( _PIA_NEW_PORT != _TRANSMISSION_PEER_PORT )); then
+  if [[ "${ENABLE_UFW}" == "true" ]]; then
     echo "Update UFW rules before changing port in Transmission"
 
-    echo "denying access to $transmission_peer_port"
-    ufw deny "$transmission_peer_port"
-
-    echo "allowing $new_port through the firewall"
-    ufw allow "$new_port"
+    echo "denying access to ${_TRANSMISSION_PEER_PORT}"
+    _UFW_RESP="$(ufw deny "${_TRANSMISSION_PEER_PORT}" 2>&1)"
+    if (( $? != 0 )); then
+      echo "${_UFW_RESP}"
+    fi
+    echo "allowing ${_PIA_NEW_PORT} through the firewall"
+    _UFW_RESP="$(ufw allow "${_PIA_NEW_PORT}" 2>&1)"
+    if (( $? != 0 )); then
+      echo "${_UFW_RESP}"
+    fi
   fi
 
-  transmission-remote $myauth -p "$new_port"
+  transmission-remote ${_TRANSMISSION_AUTH} -p "${_PIA_NEW_PORT}"
 
   echo "Checking port..."
   sleep 10
-  transmission-remote $myauth -pt
+  transmission-remote ${_TRANSMISSION_AUTH} -pt
 else
-    echo "No action needed, port hasn't changed"
+  echo "No action needed, port hasn't changed"
 fi
