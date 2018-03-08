@@ -59,7 +59,7 @@ fi
 # Check for curl error (curl will fail on HTTP errors with -f flag)
 if (( _PIA_CURL_EXIT_CODE != 0 )); then
   echo "curl encountered an error looking up new port: ${_PIA_CURL_EXIT_CODE}"
-  if (( _PIA_CURL_EXIT_CODE == 7 )); then
+  if (( _PIA_CURL_EXIT_CODE == 7 || _PIA_CURL_EXIT_CODE == 56 )); then
     exit 64
   fi
   exit 1
