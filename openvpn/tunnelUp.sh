@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
-/etc/transmission/start.sh "$@"
-/opt/tinyproxy/start.sh
+/etc/transmission/start.sh "$@" && \
+  /opt/tinyproxy/start.sh

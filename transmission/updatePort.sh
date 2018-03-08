@@ -39,7 +39,7 @@ fi
 
 # Get the port
 _PORT_ASSIGNMENT_URL="http://209.222.18.222:2000/?client_id=${_PIA_CLIENT_ID}"
-_PIA_RESPONSE="$(curl --connect-timeout 10 --max-time=60 --retry 3 --retry-delay 5 -s -f "${_PORT_ASSIGNMENT_URL}")"
+_PIA_RESPONSE="$(curl --connect-timeout 10 --max-time 60 --retry 3 --retry-delay 5 -s -f "${_PORT_ASSIGNMENT_URL}")"
 _PIA_CURL_EXIT_CODE="$?"
 
 if [[ -z "${_PIA_RESPONSE}" ]]; then
