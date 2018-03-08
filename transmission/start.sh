@@ -67,9 +67,20 @@ exec su --preserve-environment ${RUN_AS} -s /bin/bash -c "/usr/bin/transmission-
 if [[ "${OPENVPN_PROVIDER}" = "PIA" ]]; then
   echo "CONFIGURING PORT FORWARDING"
   /etc/transmission/updatePort.sh
-  if (( ${?} != 0 )); then
-    echo "ERROR: Port forward failed! Exiting!"
-    exit 1
+  _PORT_FORWARD_RESP="${?}"
+  if (( _PORT_FORWARD_RESP != 0 )); then
+    case ${_PORT_FORWARD_RESP} in
+      1)
+        echo "ERROR: Port forward failed!"
+        if [[ "${PIA_FAIL_ON_FORWARD_ERROR,,}" == "true" ]]; then
+          echo "EXITING!"
+          exit 1
+        fi
+        ;;
+      64)
+        echo "Curl reports unable to connect. Assuming not on zone with Port Forwarding enabled."
+        ;;
+    esac
   fi
 fi
 

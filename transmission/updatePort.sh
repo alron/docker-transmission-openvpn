@@ -39,8 +39,18 @@ fi
 
 # Get the port
 _PORT_ASSIGNMENT_URL="http://209.222.18.222:2000/?client_id=${_PIA_CLIENT_ID}"
-_PIA_RESPONSE="$(curl --connect-timeout 10 --max-time 60 --retry 3 --retry-delay 5 -s -f "${_PORT_ASSIGNMENT_URL}")"
-_PIA_CURL_EXIT_CODE="$?"
+
+## Try registration url 5 times with 5 second delay between each try. Should help deal with delay beteen login and registration working.
+_PIA_CURL_EXIT_CODE=255
+_COUNTER=1
+until (( _PIA_CURL_EXIT_CODE == 0 )) || (( _COUNTER == 5 )); do
+  if (( _PIA_CURL_EXIT_CODE != 255)); then
+    sleep 5
+  fi
+  _PIA_RESPONSE="$(curl --connect-timeout 10 --max-time 60 --retry 3 --retry-delay 5 -s -f "${_PORT_ASSIGNMENT_URL}")"
+  _PIA_CURL_EXIT_CODE="$?"
+  ((_COUNTER++))
+done
 
 if [[ -z "${_PIA_RESPONSE}" ]]; then
   echo "Port forwarding is already activated on this connection, has expired, or you are not connected to a PIA region that supports port forwarding"
@@ -49,6 +59,9 @@ fi
 # Check for curl error (curl will fail on HTTP errors with -f flag)
 if (( _PIA_CURL_EXIT_CODE != 0 )); then
   echo "curl encountered an error looking up new port: ${_PIA_CURL_EXIT_CODE}"
+  if (( _PIA_CURL_EXIT_CODE == 7 )); then
+    exit 64
+  fi
   exit 1
 fi
 
